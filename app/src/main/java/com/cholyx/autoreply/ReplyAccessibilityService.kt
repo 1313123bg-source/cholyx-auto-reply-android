@@ -15,10 +15,20 @@ class ReplyAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val packageName = event?.packageName?.toString() ?: return
-        if (packageName != "com.opera.browser" && packageName != "com.openai.chatgpt") return
         if (busy) return
 
         val prefs = getSharedPreferences("CholyxPrefs", MODE_PRIVATE)
+        if (!prefs.getBoolean("enabled", false)) return
+
+        val operaAllowed = prefs.getBoolean("opera", true)
+        val chatgptAllowed = prefs.getBoolean("chatgpt", false)
+        val packageAllowed = when (packageName) {
+            "com.opera.browser" -> operaAllowed
+            "com.openai.chatgpt" -> chatgptAllowed
+            else -> false
+        }
+        if (!packageAllowed) return
+
         val message = prefs.getString("msg", "Нека продължим") ?: "Нека продължим"
         val delaySeconds = prefs.getInt("delay", 5).coerceAtLeast(1)
         val limit = prefs.getInt("limit", 10).coerceAtLeast(1)
@@ -26,20 +36,17 @@ class ReplyAccessibilityService : AccessibilityService() {
 
         val root = rootInActiveWindow ?: return
         val screenText = collectText(root).lowercase()
-        if (!isChatGPTScreen(screenText)) return
+        if (packageName == "com.opera.browser" && !isChatGPTScreen(screenText)) return
 
         val allowedChats = prefs.getString("chats", "").orEmpty()
-            .lines()
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
+            .lines().map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         if (allowedChats.isNotEmpty() && allowedChats.none { screenText.contains(it) }) return
 
         val signature = screenText.takeLast(1200)
         if (signature == lastScreenSignature) return
         lastScreenSignature = signature
 
-        val edit = findEditable(root) ?: return
-        val send = findSendButton(root) ?: return
+        if (findEditable(root) == null || findSendButton(root) == null) return
 
         busy = true
         handler.postDelayed({
@@ -60,22 +67,14 @@ class ReplyAccessibilityService : AccessibilityService() {
                         count++
                         busy = false
                     }, 300)
-                } else {
-                    busy = false
-                }
-            } catch (_: Exception) {
-                busy = false
-            }
+                } else busy = false
+            } catch (_: Exception) { busy = false }
         }, delaySeconds * 1000L)
     }
 
-    private fun isChatGPTScreen(text: String): Boolean {
-        return text.contains("chatgpt") ||
-            text.contains("openai") ||
-            text.contains("what can i help") ||
-            text.contains("какво мога да помогна") ||
-            text.contains("какво да направя")
-    }
+    private fun isChatGPTScreen(text: String): Boolean =
+        text.contains("chatgpt") || text.contains("openai") ||
+        text.contains("what can i help") || text.contains("какво мога")
 
     private fun collectText(node: AccessibilityNodeInfo): String {
         val parts = mutableListOf<String>()
@@ -92,30 +91,21 @@ class ReplyAccessibilityService : AccessibilityService() {
     private fun findEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         if (node.isEditable && node.isEnabled) return node
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val result = findEditable(child)
+            val result = node.getChild(i)?.let { findEditable(it) }
             if (result != null) return result
         }
         return null
     }
 
     private fun findSendButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val description = node.contentDescription?.toString().orEmpty().lowercase()
-        val text = node.text?.toString().orEmpty().lowercase()
-        val className = node.className?.toString().orEmpty()
-        val label = "$description $text"
-        val isButton = className.contains("button", ignoreCase = true) ||
-            node.isClickable
-        val matches = label.contains("send") ||
-            label.contains("изпрати") ||
-            label.contains("изпращане") ||
-            label.contains("submit") ||
-            label.contains("arrow up")
+        val label = (node.contentDescription?.toString().orEmpty() + " " +
+            node.text?.toString().orEmpty()).lowercase()
+        val isButton = node.className?.toString()?.contains("button", true) == true || node.isClickable
+        val matches = label.contains("send") || label.contains("изпрати") ||
+            label.contains("submit") || label.contains("arrow up")
         if (isButton && matches && node.isEnabled) return node
-
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val result = findSendButton(child)
+            val result = node.getChild(i)?.let { findSendButton(it) }
             if (result != null) return result
         }
         return null
