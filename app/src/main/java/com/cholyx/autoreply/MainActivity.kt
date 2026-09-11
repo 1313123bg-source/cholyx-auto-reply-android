@@ -63,7 +63,7 @@ class MainActivity : Activity() {
                     .putBoolean("opera", opera.isChecked)
                     .putBoolean("chatgpt", chatgpt.isChecked)
                     .apply()
-                Toast.makeText(this, "Настройките са запазени", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Настройките са запазени", Toast.LENGTH_SHORT).show()
             }
         }
         val open = Button(this).apply {
